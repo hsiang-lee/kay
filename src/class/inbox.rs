@@ -47,7 +47,7 @@ impl Inbox {
         }
     }
 
-    pub fn drain(&mut self) -> InboxIterator {
+    pub fn drain(&mut self) -> InboxIterator<'_> {
         InboxIterator {
             n_messages_to_read: self.queue.len(),
             queue: &mut self.queue,

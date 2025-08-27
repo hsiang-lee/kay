@@ -20,10 +20,6 @@
 //! [Compact](https://TODO)
 
 #![warn(missing_docs)]
-#![feature(core_intrinsics)]
-#![feature(optin_builtin_traits)]
-#![feature(specialization)]
-#![feature(box_syntax)]
 extern crate chunky;
 extern crate compact;
 #[macro_use]
@@ -43,24 +39,32 @@ extern crate serde_derive;
 extern crate serde;
 
 macro_rules! make_array {
-    ($n:expr, $constructor:expr) => {{
-        let mut items: [_; $n] = ::std::mem::uninitialized();
-        for (i, place) in items.iter_mut().enumerate() {
-            ::std::ptr::write(place, $constructor(i));
+    ($n:expr, $element:expr) => {{
+        use std::mem::MaybeUninit;
+
+        let mut items: [MaybeUninit<_>; $n] = unsafe { MaybeUninit::uninit().assume_init() };
+
+        for i in 0..$n {
+            items[i] = MaybeUninit::new($element(i));
         }
-        items
+
+        unsafe {
+            let result = std::ptr::read(&items as *const _ as *const [_; $n]);
+            std::mem::forget(items);
+            result
+        }
     }};
 }
 
-mod tuning;
 mod actor;
 mod actor_system;
+mod class;
 mod external;
 mod id;
-mod class;
 mod messaging;
 mod networking;
 mod storage_aware;
+mod tuning;
 mod type_registry;
 
 pub use self::actor::{Actor, ActorOrActorTrait, TraitIDFrom};

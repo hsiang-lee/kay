@@ -1,13 +1,13 @@
 use crate::actor::{Actor, ActorOrActorTrait};
-use crate::class::{Class, ActorVTable};
+use crate::class::{ActorVTable, Class};
 use crate::id::{MachineID, RawID};
 use crate::messaging::{Fate, Message, Packet};
 use crate::networking::Networking;
-use crate::type_registry::{ShortTypeId, TypeRegistry};
 use crate::tuning::Tuning;
+use crate::type_registry::{ShortTypeId, TypeRegistry};
 
 use std::collections::HashMap;
-use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::rc::Rc;
 
 const MAX_RECIPIENT_TYPES: usize = 64;
@@ -27,7 +27,7 @@ pub struct ActorSystem {
     message_statistics: [usize; MAX_MESSAGE_TYPES],
     networking: Networking,
     storage: Rc<dyn chunky::ChunkStorage>,
-    tuning: Tuning
+    tuning: Tuning,
 }
 
 impl ActorSystem {
@@ -38,22 +38,37 @@ impl ActorSystem {
 
     /// Create a new actor system that lives in memory and is persisted to disk using Mmapping
     #[cfg(feature = "server")]
-    pub fn new_mmap_persisted<P: AsRef<::std::path::Path>>(networking: Networking, directory: &P, tuning: Tuning) -> ActorSystem {
-        Self::new_with_storage(networking, Rc::new(chunky::MmapStorage::new(directory.as_ref().to_owned())), tuning)
+    pub fn new_mmap_persisted<P: AsRef<::std::path::Path>>(
+        networking: Networking,
+        directory: &P,
+        tuning: Tuning,
+    ) -> ActorSystem {
+        Self::new_with_storage(
+            networking,
+            Rc::new(chunky::MmapStorage::new(directory.as_ref().to_owned())),
+            tuning,
+        )
     }
 
     /// Create a new actor system backed by any `chunky::ChunkStorage`
-    pub fn new_with_storage(networking: Networking, storage: Rc<dyn chunky::ChunkStorage>, tuning: Tuning) -> ActorSystem {
+    pub fn new_with_storage(
+        networking: Networking,
+        storage: Rc<dyn chunky::ChunkStorage>,
+        tuning: Tuning,
+    ) -> ActorSystem {
         ActorSystem {
             panic_happened: false,
-            trait_implementors: unsafe { make_array!(MAX_RECIPIENT_TYPES, |_| None) },
+            trait_implementors: make_array!(
+                MAX_RECIPIENT_TYPES,
+                |_| None::<Box<dyn std::any::Any>>
+            ),
             actor_registry: TypeRegistry::new(),
             message_registry: TypeRegistry::new(),
-            classes: unsafe { make_array!(MAX_RECIPIENT_TYPES, |_| None) },
+            classes: make_array!(MAX_RECIPIENT_TYPES, |_| None::<Box<dyn std::any::Any>>),
             message_statistics: [0; MAX_MESSAGE_TYPES],
             networking,
             storage,
-            tuning
+            tuning,
         }
     }
 
@@ -64,7 +79,11 @@ impl ActorSystem {
         // ...but still make sure it is only added once
         assert!(self.classes[actor_id.as_usize()].is_none());
         // Store pointer to the actor
-        let class = Class::new(ActorVTable::new_for_actor_type::<A>(), Rc::clone(&self.storage), &self.tuning);
+        let class = Class::new(
+            ActorVTable::new_for_actor_type::<A>(),
+            Rc::clone(&self.storage),
+            &self.tuning,
+        );
         self.classes[actor_id.as_usize()] = Some(class);
     }
 
@@ -104,7 +123,9 @@ impl ActorSystem {
     ) {
         let actor_id = self.actor_registry.get::<A>();
         let message_id = self.message_registry.get_or_register::<M>();
-        let class = self.classes[actor_id.as_usize()].as_mut().expect("Actor not added yet");
+        let class = self.classes[actor_id.as_usize()]
+            .as_mut()
+            .expect("Actor not added yet");
         class.add_handler(message_id, handler, critical);
     }
 
@@ -116,7 +137,9 @@ impl ActorSystem {
     ) {
         let actor_id = self.actor_registry.get::<A>();
         let message_id = self.message_registry.get_or_register::<M>();
-        let class = self.classes[actor_id.as_usize()].as_mut().expect("Actor not added yet");
+        let class = self.classes[actor_id.as_usize()]
+            .as_mut()
+            .expect("Actor not added yet");
         class.add_spawner(message_id, constructor, critical);
     }
 
@@ -138,9 +161,13 @@ impl ActorSystem {
         if to_here || global {
             if let Some(class) = self.classes[recipient.type_id.as_usize()].as_mut() {
                 class.inbox.put(packet, &self.message_registry);
-            } else if let Some(implementors) = self.trait_implementors[recipient.type_id.as_usize()].as_ref() {
+            } else if let Some(implementors) =
+                self.trait_implementors[recipient.type_id.as_usize()].as_ref()
+            {
                 for implementor_type_id in implementors {
-                    let class = self.classes[implementor_type_id.as_usize()].as_mut().expect("Implementor should exist");
+                    let class = self.classes[implementor_type_id.as_usize()]
+                        .as_mut()
+                        .expect("Implementor should exist");
                     class.inbox.put(packet.clone(), &self.message_registry);
                 }
             } else {
@@ -229,10 +256,17 @@ impl ActorSystem {
             .filter_map(|maybe_class| maybe_class.as_ref())
             .map(|class| {
                 (
-                    class.v_table.type_name.split("::").last().unwrap().replace(">", ""),
+                    class
+                        .v_table
+                        .type_name
+                        .split("::")
+                        .last()
+                        .unwrap()
+                        .replace(">", ""),
                     *class.instance_store.n_instances,
                 )
-            }).collect()
+            })
+            .collect()
     }
 
     /// Get statistics of sent messages per type
@@ -249,7 +283,8 @@ impl ActorSystem {
                 } else {
                     None
                 }
-            }).collect()
+            })
+            .collect()
     }
 
     /// Reset the counter for message statistics
@@ -277,15 +312,18 @@ impl ActorSystem {
                         .get_name(ShortTypeId::new(i as u16).unwrap());
                     (actor_name.to_owned(), class.inbox.len())
                 })
-            }).chain(connection_queue_length)
+            })
+            .chain(connection_queue_length)
             .collect()
     }
 
     /// Get a mapping from actor type IDs to full names, for debugging.
     pub fn get_actor_type_id_to_name_mapping(&self) -> HashMap<u16, String> {
-        self.actor_registry.short_ids_to_names.iter().map(|(short_id, name)|
-            (short_id.as_u16(), name.clone())
-        ).collect()
+        self.actor_registry
+            .short_ids_to_names
+            .iter()
+            .map(|(short_id, name)| (short_id.as_u16(), name.clone()))
+            .collect()
     }
 }
 
@@ -332,9 +370,14 @@ impl World {
     /// Allocate a new instance id to be used by a to-be-spawned actor
     pub fn allocate_instance_id<A: 'static + Actor>(&mut self) -> RawID {
         let system: &mut ActorSystem = unsafe { &mut *self.0 };
-        let class = system.classes[system.actor_registry.get::<A>().as_usize()].as_mut()
-                .expect("Subactor type not found.");
-        unsafe { class.instance_store.allocate_id(self.local_broadcast::<A>()) }
+        let class = system.classes[system.actor_registry.get::<A>().as_usize()]
+            .as_mut()
+            .expect("Subactor type not found.");
+        unsafe {
+            class
+                .instance_store
+                .allocate_id(self.local_broadcast::<A>())
+        }
     }
 
     /// Get the machine ID of this system in the network

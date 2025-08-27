@@ -1,5 +1,5 @@
 use crate::class::Class;
-use crate::id::{broadcast_machine_id, MachineID, RawID};
+use crate::id::{MachineID, RawID, broadcast_machine_id};
 use crate::messaging::{Message, Packet};
 use crate::type_registry::ShortTypeId;
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
@@ -15,8 +15,8 @@ use stdweb::web::{SocketBinaryType, SocketReadyState, TypedArray, WebSocket};
 use tungstenite::util::NonBlockingError;
 #[cfg(feature = "server")]
 use tungstenite::{
-    accept as websocket_accept, client as websocket_client, HandshakeError,
-    Message as WebSocketMessage, WebSocket,
+    HandshakeError, Message as WebSocketMessage, WebSocket, accept as websocket_accept,
+    client as websocket_client,
 };
 #[cfg(feature = "server")]
 use url::Url;
@@ -83,7 +83,7 @@ impl Networking {
                         handshake_state = match handshake_state {
                             Some(Ok(mut websocket)) => {
                                 loop {
-                                    match websocket.read_message() {
+                                    match websocket.read() {
                                         Ok(WebSocketMessage::Binary(data)) => {
                                             let peer_machine_id = data[0];
                                             self.network_connections[peer_machine_id as usize] =
@@ -132,13 +132,17 @@ impl Networking {
                     let stream = TcpStream::connect(address).unwrap();
                     stream.set_read_timeout(None).unwrap();
                     stream.set_write_timeout(None).unwrap();
-                    let mut websocket =
-                        websocket_client(Url::parse(&format!("ws://{}", address)).unwrap(), stream)
+                    let mut websocket = websocket_client(
+                        Url::parse(&format!("ws://{}", address))
                             .unwrap()
-                            .0;
+                            .to_string(),
+                        stream,
+                    )
+                    .unwrap()
+                    .0;
                     match websocket
-                        .write_message(WebSocketMessage::binary(vec![self.machine_id.0]))
-                        .and_then(|_| websocket.write_pending())
+                        .send(WebSocketMessage::binary(vec![self.machine_id.0]))
+                        .and_then(|_| websocket.flush())
                     {
                         Ok(_) => {}
                         Err(e) => panic!("Error while sending first message: {}", e),
@@ -320,7 +324,7 @@ impl Networking {
     }
 }
 
-fn websocket_address(address: &str) -> String  {
+fn websocket_address(address: &str) -> String {
     let v: Vec<&str> = address.split("://").collect();
     if v.len() == 1 {
         format!("ws://{}", &v[0])
@@ -331,7 +335,7 @@ fn websocket_address(address: &str) -> String  {
             "https" => format!("wss://{}", rest),
             "wss" => address.to_owned(),
             "ws" => address.to_owned(),
-            _ => format!("ws://{}", rest)
+            _ => format!("ws://{}", rest),
         }
     }
 }
@@ -405,10 +409,7 @@ impl Connection {
 
     pub fn try_send_pending(&mut self) -> Result<(), ::tungstenite::Error> {
         for batch in self.out_batches.drain(..) {
-            match self
-                .websocket
-                .write_message(WebSocketMessage::binary(batch))
-            {
+            match self.websocket.send(WebSocketMessage::binary(batch)) {
                 Ok(_) => {}
                 Err(e) => {
                     if let Some(real_err) = e.into_non_blocking() {
@@ -421,7 +422,7 @@ impl Connection {
         self.out_batches
             .push(Vec::with_capacity(self.batch_message_bytes));
 
-        match self.websocket.write_pending() {
+        match self.websocket.flush() {
             Ok(()) => Ok(()),
             Err(e) => {
                 if let Some(real_err) = e.into_non_blocking() {
@@ -439,7 +440,7 @@ impl Connection {
         implementors: &mut [Option<Vec<ShortTypeId>>],
     ) -> Result<(), ::tungstenite::Error> {
         loop {
-            let blocked = match self.websocket.read_message() {
+            let blocked = match self.websocket.read() {
                 Ok(WebSocketMessage::Binary(data)) => dispatch_batch(
                     &data,
                     classes,

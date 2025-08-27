@@ -1,12 +1,9 @@
+use std::any::{TypeId, type_name};
 use std::collections::HashMap;
 use std::convert::From;
-use std::intrinsics::{type_id, type_name};
 use std::num::NonZeroU16;
 
-#[cfg_attr(
-    feature = "serde-serialization",
-    derive(Serialize, Deserialize)
-)]
+#[cfg_attr(feature = "serde-serialization", derive(Serialize, Deserialize))]
 #[derive(Copy, Clone, Hash, PartialEq, Eq)]
 pub struct ShortTypeId(NonZeroU16);
 
@@ -32,7 +29,7 @@ impl From<ShortTypeId> for u16 {
 
 pub struct TypeRegistry {
     next_short_id: ShortTypeId,
-    long_to_short_ids: HashMap<u64, ShortTypeId>,
+    long_to_short_ids: HashMap<TypeId, ShortTypeId>,
     pub short_ids_to_names: HashMap<ShortTypeId, String>,
 }
 
@@ -47,26 +44,26 @@ impl TypeRegistry {
 
     pub fn register_new<T: 'static>(&mut self) -> ShortTypeId {
         let short_id = self.next_short_id;
-        let long_id = unsafe { type_id::<T>() };
+        let long_id = TypeId::of::<T>();
         assert!(self.long_to_short_ids.get(&long_id).is_none());
         self.long_to_short_ids.insert(long_id, short_id);
         self.short_ids_to_names
-            .insert(short_id, unsafe { type_name::<T>() }.into());
+            .insert(short_id, type_name::<T>().into());
         self.next_short_id = ShortTypeId::new(u16::from(self.next_short_id) + 1).unwrap();
         short_id
     }
 
     pub fn get<T: 'static>(&self) -> ShortTypeId {
-        if let Some(&short_id) = self.long_to_short_ids.get(&unsafe { type_id::<T>() }) {
+        if let Some(&short_id) = self.long_to_short_ids.get(&TypeId::of::<T>()) {
             short_id
         } else {
-            panic!("{:?} not known.", &unsafe { type_name::<T>() })
+            panic!("{:?} not known.", &type_name::<T>())
         }
     }
 
     pub fn get_or_register<T: 'static>(&mut self) -> ShortTypeId {
         self.long_to_short_ids
-            .get(&unsafe { type_id::<T>() })
+            .get(&TypeId::of::<T>())
             .cloned()
             .unwrap_or_else(|| self.register_new::<T>())
     }
