@@ -12,7 +12,7 @@ maintenance = { status = "experimental" }
 
 [dependencies]
 byteorder = "1"
-chunky = "0.3.7"
+chunky = {git = "https://github.com/hsiang-lee/chunky.git", rev = "cc6c530667" }
 compact = {git = "https://github.com/hsiang-lee/compact.git", rev = "5018c65c9a"}
 compact_macros = "0.1.0"
 url ="2.5.7"
