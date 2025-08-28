@@ -60,11 +60,11 @@ impl ActorSystem {
             panic_happened: false,
             trait_implementors: make_array!(
                 MAX_RECIPIENT_TYPES,
-                |_| None::<Box<dyn std::any::Any>>
+                |_| None::<Vec<ShortTypeId>>
             ),
             actor_registry: TypeRegistry::new(),
             message_registry: TypeRegistry::new(),
-            classes: make_array!(MAX_RECIPIENT_TYPES, |_| None::<Box<dyn std::any::Any>>),
+            classes: make_array!(MAX_RECIPIENT_TYPES, |_| None::<Class>),
             message_statistics: [0; MAX_MESSAGE_TYPES],
             networking,
             storage,
